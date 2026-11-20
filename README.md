@@ -25,10 +25,11 @@ plug-ins.
 
 ## Controls
 
-Every plug-in has the machine's knobs (page "Machine") and the AMP page's
-knobs (page "Amp"). All of them are 0–127 like the unit's knobs, can be
-automated and modulated in Bitwig, and default to the unit's values.
-Knobs a machine does not read are hidden parameters.
+Every plug-in has the machine's knobs (page "Machine"), the AMP page's
+knobs (page "Amp") and three pitch parameters (module "Pitch"). The knobs
+are 0–127 like the unit's knobs, can be automated and modulated in Bitwig,
+and default to the unit's values. Parameters a machine does not read are
+hidden.
 
 **Mono GND SIN** has one knob:
 
@@ -44,8 +45,9 @@ Knobs a machine does not read are hidden parameters.
 | Red          | RED  | The colour. From 0 to 64 it fades from white (at a quarter of full scale) to pink (at full). From 64 to 127 it fades from pink to red (at full). The display shows the mix. |
 | Stereo       | STON | At 64 and up, stereo. Below 64, both sides get the left side's mix, so at Width 0 that is the two channels' average. |
 
-NOIS has no pitch, so its TUNE and the Amp page's Portamento do nothing.
-The plug-in hides them. A note only opens the AMP envelope.
+NOIS has no pitch, so its TUNE, the Amp page's Portamento and the pitch
+parameters do nothing. The plug-in hides them. A note only opens the AMP
+envelope.
 
 The Amp page, in both:
 
@@ -58,6 +60,18 @@ The Amp page, in both:
 | Volume    | VOL  | The level, (VOL/128)². |
 | Pan       | PAN  | Equal-power panning (−64 to +63 on the display). At the centre the left side is 0.11 dB lower than the right, as on the unit. |
 | Portamento | PORT | SIN: the glide to a new note, in beats of the host's tempo, whatever the interval. 0 is instant, 32 about 1/30 beat, 64 a third of a beat, 96 three beats, 127 about 27 beats (2^(13 Portamento/128)/276 beats). |
+
+The pitch parameters, in SIN:
+
+| Parameter   | On the unit | What it does |
+|-------------|-------------|--------------|
+| Pitch Mod   | where the LFOs aimed at PTCH land (block word 30) | 64 is no change; each step is 2.06 semitones (352/2048 octave), and fractions of a step are kept. Modulate it in Bitwig as the unit's LFOs modulate pitch. 0 and 127 are −132 and +130 semitones; the pitch itself stops at the kernel's 11-octave range. |
+| Bend Range  | KIT > ASSIGN, JOY R/L, PAGE PTCH, DEST | How far MIDI pitch bend goes at its ends: 1/12, 2/12 (the default, ±2.01 semitones), 7/12, 1OCT, 2OCT, 4OCT, 8OCT or 16OC. |
+| Master Tune | GLOBAL > AUDIO > MASTER TUNE | 400.0 to 499.9 Hz in steps of 0.1 Hz, default 440.0. |
+
+MIDI pitch bend works as the joystick's left and right do on the unit with
+KIT > ASSIGN set to MIRR on, PAGE PTCH, DEST the Bend Range and ADD +63.
+Only the bend's top 8 bits count, as on the unit: 128 steps each way.
 
 The Monomachine's envelope has no sustain. The level falls with Decay even
 while the note is held (set Decay to 127 to hold it), and a note's end
@@ -72,8 +86,8 @@ This is what the firmware does; the plug-in keeps all of it.
   kernel's frequency word × 0.1858. The step is ramped from the last block's
   step in 16 equal parts, so pitch changes and glides are smooth within a
   block. A note does not reset the phase, which runs on from the machine's
-  assignment. A4 is 439.80 Hz (−0.78 cents), as in SWAVE PULS. The interpolation
-  error is below the 24-bit output's last bit.
+  assignment. A4 is 439.95 Hz (−0.19 cents) at Master Tune 440.0, as in
+  SWAVE PULS. The interpolation error is below the 24-bit output's last bit.
 - **NOIS' white noise** gives two words per sample, left and right. Each
   word is the sum of the two before it, mod 2^24: a Fibonacci-style
   generator. At each 16-sample block the firmware stores the pair in the
@@ -104,6 +118,15 @@ This is what the firmware does; the plug-in keeps all of it.
   where you set it. Modulation is added on top, unsmoothed, every 48
   samples, as the unit's LFOs are. Notes and the tempo are taken every 48
   samples too.
+- **The pitch** is the kernel's sum, once per block: the note's glide,
+  then Master Tune, Tune, Pitch Mod and the bend, clamped to the kernel's
+  11 octaves. The glide does not smooth Pitch Mod or the bend.
+  - Master Tune is the main OS's table, trunc(2048 log2(f/440)) in 1/2048
+    octaves (0 at 440.0 Hz, −281 at 400.0 Hz).
+  - A pitch bend at its end adds 127 × 63 × the range's step to word 30.
+    The steps are 4, 8, 28, 48, 96, 192, 384 and 768 (the main OS's table).
+    The left side's ADD is −63, as the unit's mirror makes it. The result is
+    kept to 0..$7EFFFF, on the side it moves.
 - **The AMP gains** move in a straight line across each 16-sample block.
   The AMP section's product is saturated at full scale (below).
 
@@ -116,7 +139,19 @@ This is what the firmware does; the plug-in keeps all of it.
   level at its default settings, 0.4455 (−7.0 dB), without its inversion,
   as Mono FM+ and Mono SWAVE do. NOIS's left and right each get that level.
 - **The rest of the track.** EQ, SRR, delay, the LFOs and the track's LEVEL
-  are not in the plug-in. Bitwig's own modulators can take the LFOs' place.
+  are not in the plug-in. Bitwig's own modulators can take the LFOs' place:
+  modulating Pitch Mod is what an LFO on the PTCH page does. The unit's LFO
+  takes a new value every 96 samples and moves a quarter of the way to it
+  each time; a Bitwig modulator is read every 48 samples, unsmoothed.
+- **Pitch bend** follows one KIT ASSIGN setting (above). On the unit the
+  joystick and bend can also go to other parameters with other ADD amounts,
+  and velocity and key position can be assigned too. Those are left out.
+- **The MULTI TRIG transpose** (SEQ START / SEQ TRNSP) reaches the kernel as
+  a second glide (block words 34 and 28). It needs the unit's sequencer, so
+  it is left out; with it at rest the kernel adds nothing.
+- **Master tune in 0.1.0** was the word Monomodule's CPU model sends, −1 at
+  440 Hz. The main OS's table gives 0, so notes are now 1/2048 octave
+  (0.59 cents) higher than in 0.1.0.
 - **Notes.** One voice: the newest note held sounds. Releasing it returns to
   the previous note still held, with a new trig; releasing the last ends the
   note. Velocity is ignored. This note handling is the plug-in's; the unit's
@@ -150,8 +185,9 @@ opened in Bitwig as part of this work.
 
 | Check | Result |
 |-------|--------|
-| Core vs. firmware, for each machine on a synth track: random notes on and off, knob moves through the CPU model (Portamento included), raw control words anywhere from 0 to $7FFFFF (also for the AMP page and the trig word), tempos from 30 to 300 BPM; 400,000 blocks each over 8 seeds; NOIS's red integrator at full scale after 8,656 of its blocks | every machine output sample (left and right) identical; every machine state word identical after every block; the AMP envelope's state, its gain ramps and its products with the firmware's own filter output identical in every block; the glide's state, the pitch index and the frequency word identical to the kernel's in every block |
-| Built plug-in code vs. firmware, with the firmware's filter output replaced by the machine's output × 0.4455 as in the plug-in: knob moves on both pages (Portamento included) through the CPU model, modulation, overlapping notes, tempo changes (240,000 blocks per plug-in: about 23,900 moves, 2,390 of them modulation; about 6,030 notes on and 4,680 off) | every output sample identical |
+| Core vs. firmware, for each machine on a synth track: random notes on and off, knob moves through the CPU model (Portamento included), raw control words anywhere from 0 to $7FFFFF (also for the AMP page, the trig word and Pitch Mod's word 30), Master Tune words from the whole table, tempos from 30 to 300 BPM; 400,000 blocks each over 8 seeds; NOIS's red integrator at full scale after 8,656 of its blocks | every machine output sample (left and right) identical; every machine state word identical after every block; the AMP envelope's state, its gain ramps and its products with the firmware's own filter output identical in every block; the glide's state, the pitch index and the frequency word identical to the kernel's in every block |
+| Built plug-in code vs. firmware, with the firmware's filter output replaced by the machine's output × 0.4455 as in the plug-in: knob moves on both pages (Portamento included) through the CPU model, modulation, overlapping notes, tempo changes, Pitch Mod moves and modulation, MIDI pitch bends, Bend Range and Master Tune changes (SIN: 240,000 blocks, 24,121 moves, 1,831 of them modulation, 3,735 pitch-parameter changes, 1,876 bends, 4,694 notes on and 3,690 off; NOIS: 60,000 blocks) | every output sample identical |
+| The main CPU's pitch words vs. the main OS (the OS image's tables, not the DSP's) | identical: all 1,000 Master Tune words and the 8 bend-range steps |
 | Tables vs. firmware memory | identical: the sine, the pitch table, the AMP section's attack, decay and portamento tables, and the pink filter's coefficients |
 
 The tables: the sine is the boot code's recurrence, reproduced exactly; the
@@ -162,7 +198,9 @@ coefficients are written in the source as numbers.
 
 `tests/test_core.c` pins this without the firmware. Its expected hashes were
 produced by feeding the same stimulus into the firmware's machines and AMP
-section, which the core matched from its own start.
+section, which the core matched from its own start. Its stimulus also moves
+Pitch Mod's word and the Master Tune word. It also hashes the Master Tune
+words and every bend value against a hash of the main OS's own tables.
 
 ## Build and install
 
@@ -186,17 +224,21 @@ cc -std=c99 -O2 -Wno-unused-function tests/test_core.c -lm -o tests/test_core &&
 xcrun clang -std=c11 -O2 -Wno-unused-function -Wno-missing-field-initializers -I vendor/clap/include tests/clap_test.c -o tests/clap_test && tests/clap_test "build/Mono GND.clap"
 ```
 
-`test_core` checks the tables and 12,000 blocks of each machine's output and
-AMP output against the firmware-derived hashes. `clap_test` loads the built
+`test_core` checks the tables, the main CPU's pitch words and 12,000 blocks
+of each machine's output and AMP output against the firmware-derived hashes. `clap_test` loads the built
 bundle and checks:
 
-- the two plug-ins, each with its fifteen parameters (the ones a machine
+- the two plug-ins, each with its eighteen parameters (the ones a machine
   does not read hidden, also on the remote-control pages);
 - at 44.1 kHz, each plug-in's output equal to the core's, for notes on and
   off at and between control frames, with the machines' knobs away from
-  their defaults and Portamento at 0 and at 50 (and that 50 glides in SIN);
+  their defaults, Portamento at 0 and at 50 (and that 50 glides in SIN), and
+  Pitch Mod and Master Tune away from theirs;
 - SIN at the core's frequency for A4 at 44.1 and 48 kHz, and 197 cents
   higher with Tune at 127;
+- SIN's pitch at the core's frequency with a full bend up and down
+  (±201 cents at 2/12), Pitch Mod 65 (+206 cents) and Master Tune 415.3 Hz
+  (−100 cents);
 - releasing the newer of two held notes returning to the other, and the
   release ending in silence;
 - NOIS: no sample-to-sample or left/right correlation at Red 0 and full
@@ -204,8 +246,9 @@ bundle and checks:
   sides (but for the centre pan) with Stereo off or Width 0;
 - a note's onset no earlier than the reported latency and at most one
   control frame and one block later, at 22.05, 44.1, 48 and 96 kHz;
-- state for both plug-ins (also another machine's state, a short and a bad
-  state rejected) and the parameter text.
+- state for both plug-ins (also a version 1 state, from 0.1.0, loading with
+  the pitch parameters at their defaults; another machine's state, a short
+  and a bad state rejected) and the parameter text.
 
 Both tests also pass with AddressSanitizer and UndefinedBehaviorSanitizer,
 and as Intel builds under Rosetta. The bundle passes clap-trap's `validate`
@@ -214,8 +257,8 @@ the first plug-in, SIN).
 
 ## Source
 
-- `source/mono_gnd.h`: the two machines and the kernel's pitch glide and
-  AMP section (C99 and libm).
+- `source/mono_gnd.h`: the two machines, the kernel's pitch and AMP
+  section, and the main CPU's master tune and bend words (C99 and libm).
 - `source/mono_gnd_clap.c`: the two CLAP plug-ins around it.
 - `vendor/clap`: CLAP 1.2 headers (MIT).
 
