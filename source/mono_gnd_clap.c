@@ -9,7 +9,7 @@
  *    each knob's word moves a quarter of the way to its value every 384
  *    frames, and modulation is added on top, unsmoothed, every 48 frames (as
  *    the Monomachine's LFOs are);
- *  - the pitch words: Pitch runs as an LFO on page PTCH with its wave at the
+ *  - the pitch words: the Pitch knob runs as an LFO on page PTCH with its wave at the
  *    peak (DPTH x Pitch Range, into block word 30), MIDI pitch bend is added
  *    as KIT ASSIGN JOY R/L would (MIRR on, PAGE PTCH, DEST Pitch Range, ADD
  *    +63), and Master Tune
@@ -173,11 +173,14 @@ static void control_frame(Plugin *s) {
       const int32_t word = s->mod[p] == 0 ? s->knob[p] : (int32_t)lrint(clamp(s->knob[p] + s->mod[p] * 65536.0, 0, 0x7effff));
       if (p < 8) s->syn[p] = word; else s->amp[amp_word[p - 8]] = word;
    }
-   /* Pitch is an LFO on page PTCH with its wave held at the peak: it reaches a new value in four even frames */
+   /* The Pitch knob is an LFO on page PTCH with its wave held at the peak: it reaches a new value in four even
+    * frames. Host modulation is added unsmoothed, so a pitch envelope's jump lands with its note. */
    const int range = (int)lrint(value(s, RANGE));
-   const int32_t lfo_target = mg_lfo_pitch((int)lrint(clamp(value(s, PITCH) + s->mod[PITCH], -127, 127)), range);
+   const int depth = (int)lrint(clamp(value(s, PITCH), -127, 127));
+   const int32_t lfo_target = mg_lfo_pitch(depth, range);
+   const int32_t host_mod = (int32_t)lrint((clamp(depth + s->mod[PITCH], -127, 127) - depth) * mg_lfo_pitch(1, range));
    if (!s->settled) { s->lfo = lfo_target; s->lfo_step = 0; }
-   s->pmod = mg_add_mod((64 << 16) + s->lfo, mg_bend(s->bend, range));
+   s->pmod = mg_add_mod((64 << 16) + s->lfo + host_mod, mg_bend(s->bend, range));
    if (!(frame & 1)) s->lfo += s->lfo_step;
    if (!(frame & 7)) s->lfo_step = (lfo_target - s->lfo) >> 2;
    s->mtune = mg_master_tune((int)lrint(clamp(value(s, MTUNE) * 10, 4000, 4999)));

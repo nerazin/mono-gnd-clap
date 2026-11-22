@@ -32,7 +32,7 @@
 #define MTUNE 17
 #define MAXEV 16
 
-typedef union { clap_event_header_t h; clap_event_param_value_t v; clap_event_note_t n; clap_event_midi_t m; } Event;
+typedef union { clap_event_header_t h; clap_event_param_value_t v; clap_event_note_t n; clap_event_midi_t m; clap_event_param_mod_t pm; } Event;
 typedef struct { clap_input_events_t api; Event v[NP + MAXEV]; uint32_t n; } Events;
 static uint32_t ev_size(const clap_input_events_t *e) { return ((const Events *)e->ctx)->n; }
 static const clap_event_header_t *ev_get(const clap_input_events_t *e, uint32_t i) { return &((const Events *)e->ctx)->v[i].h; }
@@ -60,7 +60,7 @@ static const clap_plugin_t *make(int m, const double v[NP], double rate) {
    CHECK(p->activate(p, rate, 1, 512) && p->start_processing(p), "activate");
    return p;
 }
-/* Notes: frame, on (1) or off (0), key; sorted by frame. on 2 is a MIDI pitch bend to key (0..16383). */
+/* Notes: frame, on (1) or off (0), key; sorted by frame. on 2 is a MIDI pitch bend to key (0..16383), on 3 host modulation of Pitch by key. */
 typedef struct { int at, on, key; } Note;
 static void run(const clap_plugin_t *p, const Note *notes, int count, double out[2][N]) {
    Events ev = {{NULL, ev_size, ev_get}, {{{0}}}, 0};
@@ -69,7 +69,10 @@ static void run(const clap_plugin_t *p, const Note *notes, int count, double out
    for (uint32_t at = 0; at < N; at += 512) {
       ev.n = 0;
       for (; next < count && notes[next].at < (int)at + 512; ++next)
-         if (notes[next].on == 2)
+         if (notes[next].on == 3)
+            ev.v[ev.n++].pm = (clap_event_param_mod_t){{sizeof ev.v[0].pm, (uint32_t)(notes[next].at - (int)at), CLAP_CORE_EVENT_SPACE_ID,
+               CLAP_EVENT_PARAM_MOD, 0}, PITCH, NULL, -1, -1, -1, -1, notes[next].key};
+         else if (notes[next].on == 2)
             ev.v[ev.n++].m = (clap_event_midi_t){{sizeof ev.v[0].m, (uint32_t)(notes[next].at - (int)at), CLAP_CORE_EVENT_SPACE_ID,
                CLAP_EVENT_MIDI, 0}, 0, {0xe0, (uint8_t)(notes[next].key & 0x7f), (uint8_t)(notes[next].key >> 7)}};
          else
@@ -230,6 +233,18 @@ int main(int argc, char **argv) {
          static const double cents[4] = {201.4, -201.4, 307.0, -100.0};
          CHECK(fabs(1200 * log2(hz / note_hz(69)) - cents[t]) < 0.6, "pitch case %d: %+.1f cents", t, 1200 * log2(hz / note_hz(69)));
       }
+   }
+
+   {  /* a Pitch modulator's jump at a note lands with the note: the knob's LFO ramp would hold it back 288 samples */
+      static const Note jump[] = {{4800, 1, 84}, {4800, 3, 127}};
+      double v[NP];
+      memcpy(v, plain, sizeof v);
+      v[RANGE] = 3;
+      const clap_plugin_t *p = make(MG_SIN, v, 44100);
+      run(p, jump, 2, out);
+      done(p);
+      const double hz = frequency(out, 4800 + 64, 4800 + 256, 44100), want = note_hz_at(84, (64 << 16) + mg_lfo_pitch(127, 3), 0);
+      CHECK(hz > 0 && fabs(1200 * log2(hz / want)) < 30, "Pitch modulation at a note: %.1f Hz, not %.1f", hz, want);
    }
 
    /* the note stack and the release */

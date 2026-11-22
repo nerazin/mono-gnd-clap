@@ -65,7 +65,7 @@ The pitch parameters, in SIN:
 
 | Parameter   | On the unit | What it does |
 |-------------|-------------|--------------|
-| Pitch       | an LFO's DPTH on page PTCH, with its wave held at the peak | −127 to +127, default 0. It adds DPTH × Pitch Range as the LFO does: at ±127 that is ±0.26 semitones at 1/12, ±3.07 at 1OCT and ±4.09 octaves at 16OC. Moves and modulation go through the LFO's ramp. |
+| Pitch       | an LFO's DPTH on page PTCH, with its wave held at the peak | −127 to +127, default 0. It adds DPTH × Pitch Range as the LFO does: at ±127 that is ±0.26 semitones at 1/12, ±3.07 at 1OCT and ±4.09 octaves at 16OC. Moves go through the LFO's ramp. Bitwig's modulation is added to the LFO's word directly, every 48 samples. |
 | Pitch Range | LFO DEST on page PTCH, and KIT > ASSIGN's DEST for the bend | 1/12, 2/12 (the default), 7/12, 1OCT, 2OCT, 4OCT, 8OCT or 16OC. It also sets how far MIDI pitch bend goes, at ASSIGN's scale, about four times the LFO's: ±2.01 semitones at 2/12. |
 | Master Tune | GLOBAL > AUDIO > MASTER TUNE | 400.0 to 499.9 Hz in steps of 0.1 Hz, default 440.0. |
 
@@ -142,10 +142,10 @@ This is what the firmware does; the plug-in keeps all of it.
   as Mono FM+ and Mono SWAVE do. NOIS's left and right each get that level.
 - **The rest of the track.** EQ, SRR, delay, the LFOs and the track's LEVEL
   are not in the plug-in. Bitwig's own modulators can take the LFOs' place:
-  modulating Pitch is what an LFO on the PTCH page does, and it runs through
-  the LFO's own ramp: a new value every 384 samples, reached in four steps
-  of 96 samples. Other knobs read a Bitwig modulator every 48 samples,
-  unsmoothed.
+  they are read every 48 samples, unsmoothed, Pitch included, so a pitch
+  envelope's jump lands with its note. The Pitch knob itself moves through
+  the LFO's ramp: a new value every 384 samples, reached in four steps of 96
+  samples.
 - **Pitch bend** follows one KIT ASSIGN setting (above). On the unit the
   joystick and bend can also go to other parameters with other ADD amounts,
   and velocity and key position can be assigned too. Those are left out.
@@ -189,7 +189,7 @@ opened in Bitwig as part of this work.
 | Check | Result |
 |-------|--------|
 | Core vs. firmware, for each machine on a synth track: random notes on and off, knob moves through the CPU model (Portamento included), raw control words anywhere from 0 to $7FFFFF (also for the AMP page, the trig word and the pitch word 30), Master Tune words from the whole table, tempos from 30 to 300 BPM; 400,000 blocks each over 8 seeds; NOIS's red integrator at full scale after 8,656 of its blocks | every machine output sample (left and right) identical; every machine state word identical after every block; the AMP envelope's state, its gain ramps and its products with the firmware's own filter output identical in every block; the glide's state, the pitch index and the frequency word identical to the kernel's in every block |
-| Built plug-in code vs. firmware, with the firmware's filter output replaced by the machine's output × 0.4455 as in the plug-in: knob moves on both pages (Portamento included) through the CPU model, modulation, overlapping notes, tempo changes, Pitch moves and modulation against the CPU model's own LFO code, MIDI pitch bends, Pitch Range and Master Tune changes (SIN: 240,000 blocks, 24,109 moves, 1,828 of them modulation, 3,739 pitch-parameter changes, 1,872 bends, 4,695 notes on and 3,687 off; NOIS: 60,000 blocks) | every output sample identical |
+| Built plug-in code vs. firmware, with the firmware's filter output replaced by the machine's output × 0.4455 as in the plug-in: knob moves on both pages (Portamento included) through the CPU model, modulation, overlapping notes, tempo changes, Pitch moves against the CPU model's own LFO code, Pitch modulation added to its word 30, MIDI pitch bends, Pitch Range and Master Tune changes (SIN: 240,000 blocks, 24,109 moves, 1,828 of them modulation, 3,739 pitch-parameter changes, 1,872 bends, 4,695 notes on and 3,687 off; NOIS: 60,000 blocks) | every output sample identical |
 | The main CPU's pitch words vs. the main OS (the OS image's tables, not the DSP's) | identical: all 1,000 Master Tune words, the 8 bend-range steps and the 8 LFO range steps |
 | Tables vs. firmware memory | identical: the sine, the pitch table, the AMP section's attack, decay and portamento tables, and the pink filter's coefficients |
 
