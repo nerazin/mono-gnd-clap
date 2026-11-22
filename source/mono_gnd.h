@@ -164,6 +164,14 @@ static int32_t mg_pitch(MgPitch *g, int32_t word, int32_t tune, int32_t port, in
  * trunc(2048 log2(f / 440)). */
 static int32_t mg_master_tune(int tenths) { return (int32_t)(2048.0 * log2(tenths / 4400.0)); }
 
+/* The PTCH page's DEST ranges in semitones: 1/12 2/12 7/12 1OCT 2OCT 4OCT 8OCT 16OC. */
+static const int32_t mg_range[8] = {1, 2, 7, 12, 24, 48, 96, 192};
+
+/* What an LFO on page PTCH adds to word 30 with its wave at the peak (+-128 in
+ * the high word) and DPTH d (negative for the inverted wave): (d x 128 >> 2) x
+ * the range's step, 2 per semitone (the main OS's table at 0x2590d4). */
+static int32_t mg_lfo_pitch(int d, int range) { return d * 64 * mg_range[range & 7]; }
+
 /* What a pitch bend adds to word 30 through KIT ASSIGN JOY R/L with MIRR on,
  * PAGE PTCH, DEST range (0..7: 1/12 2/12 7/12 1OCT 2OCT 4OCT 8OCT 16OC) and
  * ADD +63: the bend's top 8 bits v (2 msb + (lsb >> 6)) are JOY R at v - 128
@@ -171,8 +179,7 @@ static int32_t mg_master_tune(int tenths) { return (int32_t)(2048.0 * log2(tenth
  * range's step, which is 4 x the range in semitones (the main OS's steps at
  * 0x251b30: 4 8 28 48 96 192 384 768). */
 static int32_t mg_bend(int v, int range) {
-   static const int32_t semitones[8] = {1, 2, 7, 12, 24, 48, 96, 192};   /* the DEST names */
-   return (v >= 128 ? v - 128 : v - 127) * 63 * 4 * semitones[range & 7];
+   return (v >= 128 ? v - 128 : v - 127) * 63 * 4 * mg_range[range & 7];
 }
 
 /* A controller's value added to its word as 0x010003ba does: clamped on the side it moves to. */

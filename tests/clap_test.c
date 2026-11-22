@@ -27,8 +27,8 @@
 #define N (192 * 512)   /* whole process calls */
 #define NP 18
 #define PORT 14
-#define PMOD 15
-#define BEND 16
+#define PITCH 15
+#define RANGE 16
 #define MTUNE 17
 #define MAXEV 16
 
@@ -148,14 +148,14 @@ int main(int argc, char **argv) {
       memcpy(v, defaults, sizeof v);
       memcpy(v, knobs[m], sizeof knobs[m]);
       if (t >= 2) v[PORT] = 50;   /* about 170 blocks at 120 BPM */
-      if (t == 2) { v[PMOD] = 70.25; v[MTUNE] = 432.1; }
+      if (t == 2) { v[PITCH] = -37; v[RANGE] = 5; v[MTUNE] = 432.1; }
       const clap_plugin_t *p = make(m, v, 44100);
       CHECK(latency_of(p) == 0, "latency at 44.1 kHz");
       const clap_plugin_params_t *params = p->get_extension(p, CLAP_EXT_PARAMS);
       CHECK(params->count(p) == NP, "parameter count");
       int32_t syn[8], amp[8] = {0}, note = 60, word = (60 << 11) / 12, pending = 0, k = 0, bad = 0;
-      const int32_t pmod = (int32_t)lrint(t == 2 ? 70.25 * 65536 : 64 << 16), mtune = t == 2 ? mg_master_tune(4321) : 0;
-      for (uint32_t i = 0; i < PMOD; ++i) {
+      const int32_t pmod = (64 << 16) + (t == 2 ? mg_lfo_pitch(-37, 5) : 0), mtune = t == 2 ? mg_master_tune(4321) : 0;
+      for (uint32_t i = 0; i < PITCH; ++i) {
          double x;
          CHECK(params->get_value(p, i, &x), "value");
          const int32_t w = (int32_t)x << 16;
@@ -212,22 +212,22 @@ int main(int argc, char **argv) {
       const double cents = 1200 * log2(frequency(out, N / 4, N, 44100) / 440);
       CHECK(fabs(cents - 197) < 1, "TUNE 127 is %+.1f cents", cents);
    }
-   {  /* pitch bend at its ends (2/12: +-127 x 63 x 8 in word 30), Pitch Mod 65, Master Tune 415.3 Hz */
+   {  /* pitch bend at its ends (2/12: +-127 x 63 x 8 in word 30), Pitch 127 at 1OCT, Master Tune 415.3 Hz */
       static const Note up[] = {{0, 1, 69}, {0, 2, 16383}}, down[] = {{0, 1, 69}, {0, 2, 0}};
       const int32_t full = 127 * 63 * 8;
       double v[NP];
       memcpy(v, plain, sizeof v);
       for (int t = 0; t < 4; ++t) {
-         if (t == 2) v[PMOD] = 65;
-         if (t == 3) { v[PMOD] = NAN; v[MTUNE] = 415.3; }
+         if (t == 2) { v[PITCH] = 127; v[RANGE] = 3; }
+         if (t == 3) { v[PITCH] = NAN; v[RANGE] = NAN; v[MTUNE] = 415.3; }
          const clap_plugin_t *p = make(MG_SIN, v, 44100);
          run(p, t == 0 ? up : t == 1 ? down : a4, t < 2 ? 2 : 1, out);
          done(p);
          const double hz = frequency(out, N / 4, N, 44100);
-         const double want = note_hz_at(69, t == 0 ? (64 << 16) + full : t == 1 ? (64 << 16) - full : t == 2 ? 65 << 16 : 64 << 16,
+         const double want = note_hz_at(69, t == 0 ? (64 << 16) + full : t == 1 ? (64 << 16) - full : t == 2 ? (64 << 16) + mg_lfo_pitch(127, 3) : 64 << 16,
                                         t == 3 ? mg_master_tune(4153) : 0);
          CHECK(fabs(hz - want) < 0.01, "pitch case %d: %.3f Hz, not %.3f", t, hz, want);
-         static const double cents[4] = {201.4, -201.4, 206.2, -100.0};
+         static const double cents[4] = {201.4, -201.4, 307.0, -100.0};
          CHECK(fabs(1200 * log2(hz / note_hz(69)) - cents[t]) < 0.6, "pitch case %d: %+.1f cents", t, 1200 * log2(hz / note_hz(69)));
       }
    }
@@ -289,7 +289,7 @@ int main(int argc, char **argv) {
    for (int m = 0; m < 2; ++m) {
       double v[NP];
       for (int i = 0; i < NP; ++i) v[i] = (i * 37 + m * 11) % 128;
-      v[BEND] = (int)v[BEND] % 8; v[MTUNE] = 400 + v[MTUNE] / 2;
+      v[RANGE] = (int)v[RANGE] % 8; v[MTUNE] = 400 + v[MTUNE] / 2;
       const clap_plugin_t *p = make(m, v, 44100), *q = make(m, defaults, 44100), *other = make((m + 1) % 2, defaults, 44100);
       const clap_plugin_state_t *st = p->get_extension(p, CLAP_EXT_STATE);
       Buffer b = {{0}, 0, 0};
@@ -303,11 +303,17 @@ int main(int argc, char **argv) {
       CHECK(!((const clap_plugin_state_t *)other->get_extension(other, CLAP_EXT_STATE))->load(other, &is), "another machine's state accepted");
       b.pos = 0; b.size -= 8;
       CHECK(!st->load(p, &is), "short state accepted");
-      b.pos = 0; b.size += 8; b.data[7] = 3;
+      b.pos = 0; b.size += 8; b.data[7] = 4;
       CHECK(!st->load(p, &is), "unknown version accepted");
-      b.pos = 0; b.data[7] = 1; b.size = 8 + 8 * PMOD;   /* version 1: the pitch parameters at their defaults */
+      b.pos = 0; b.data[7] = 1; b.size = 8 + 8 * PITCH;   /* version 1: the pitch parameters at their defaults */
       CHECK(st->load(q, &is), "version 1 state");
-      for (uint32_t i = 0; i < NP; ++i) { double x; CHECK(pp->get_value(q, i, &x) && x == (i < PMOD ? v[i] : (const double[]){64, 1, 440}[i - PMOD]), "version 1 value %u", i); }
+      for (uint32_t i = 0; i < NP; ++i) { double x; CHECK(pp->get_value(q, i, &x) && x == (i < PITCH ? v[i] : (const double[]){0, 1, 440}[i - PITCH]), "version 1 value %u", i); }
+      {  /* the previous version's Pitch Mod becomes the Pitch that adds the same */
+         const double old = 64 + 3.0 * mg_range[(int)v[RANGE]] / 1024;
+         memcpy(b.data + 8 + 8 * PITCH, &old, 8); b.data[7] = 2; b.pos = 0; b.size = 8 + 8 * NP;
+         double x;
+         CHECK(st->load(q, &is) && pp->get_value(q, PITCH, &x) && fabs(x - 3) < 1e-9, "old Pitch Mod");
+      }
       b.size = 8 + 8 * NP;
       b.pos = 0; b.data[7] = 1; b.data[8] ^= 0xff; b.data[15] = 0x7f;
       CHECK(!st->load(p, &is), "bad value accepted");
@@ -323,12 +329,12 @@ int main(int argc, char **argv) {
       CHECK(qp->value_to_text(q, 1, 96, text, sizeof text) && !strcmp(text, "96.0 (pink 50%, red 50%)"), "red text %s", text);
       CHECK(qp->value_to_text(q, 2, 64, text, sizeof text) && !strcmp(text, "64.0 (on)"), "stereo text %s", text);
       CHECK(qp->value_to_text(q, 2, 63, text, sizeof text) && !strcmp(text, "63.0 (off)"), "stereo text %s", text);
-      CHECK(pp->value_to_text(p, PMOD, 64, text, sizeof text) && !strcmp(text, "64.0 (+0.00 st)"), "pitch mod text %s", text);
-      CHECK(pp->value_to_text(p, PMOD, 65, text, sizeof text) && !strcmp(text, "65.0 (+2.06 st)"), "pitch mod text %s", text);
-      CHECK(pp->value_to_text(p, BEND, 1, text, sizeof text) && !strcmp(text, "2/12 (+-2.01 st)"), "bend text %s", text);
+      CHECK(pp->value_to_text(p, PITCH, 0, text, sizeof text) && !strcmp(text, "+0 (+0.00 st)"), "pitch text %s", text);
+      CHECK(pp->value_to_text(p, PITCH, 127, text, sizeof text) && !strcmp(text, "+127 (+0.51 st)"), "pitch text %s", text);
+      CHECK(pp->value_to_text(p, RANGE, 1, text, sizeof text) && !strcmp(text, "2/12"), "range text %s", text);
       CHECK(pp->value_to_text(p, MTUNE, 440, text, sizeof text) && !strcmp(text, "440.0 Hz"), "master tune text %s", text);
       double y;
-      CHECK(pp->text_to_value(p, BEND, "1OCT (+-12.09 st)", &y) && y == 3, "bend from text");
+      CHECK(pp->text_to_value(p, RANGE, "1OCT", &y) && y == 3, "bend from text");
       CHECK(pp->text_to_value(p, MTUNE, "415.3 Hz", &y) && y == 415.3, "master tune from text");
       clap_param_info_t info;
       for (uint32_t i = 0; i < NP; ++i) {
@@ -340,6 +346,8 @@ int main(int argc, char **argv) {
       clap_remote_controls_page_t page;
       CHECK(rc && rc->get(q, 0, &page) && page.param_ids[0] == 0 && page.param_ids[2] == 2 && page.param_ids[3] == CLAP_INVALID_ID && page.param_ids[7] == CLAP_INVALID_ID, "NOIS's machine page");
       CHECK(rc->get(q, 1, &page) && page.param_ids[0] == 8 && page.param_ids[5] == 13 && page.param_ids[6] == CLAP_INVALID_ID, "NOIS's amp page");
+      CHECK(rc->count(q) == 2 && !rc->get(q, 2, &page), "NOIS has no pitch page");
+      CHECK(rc->count(p) == 3 && rc->get(p, 2, &page) && !strcmp(page.page_name, "Pitch") && page.param_ids[0] == PITCH && page.param_ids[1] == RANGE && page.param_ids[2] == MTUNE && page.param_ids[3] == CLAP_INVALID_ID, "the pitch page");
       double x;
       CHECK(pp->text_to_value(p, 3, "100", &x) && x == 100, "text to value");
       done(p); done(q);
